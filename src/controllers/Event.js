@@ -9,6 +9,7 @@ import {
 import { checkTrainer } from '../db/roles.js';
 import { findEventtype, addEventtypeToEvent } from '../db/types.js';
 import mongoose from 'mongoose';
+import Event from '../models/Event.js';
 
 class EventController {
   eventsGet = [
@@ -187,12 +188,23 @@ class EventController {
     async (req, res) => {
       const { id } = req.params;
 
-      try {
-        if (!id) {
-          return res.status(400).json({ error: 'Event ID is required' });
-        }
+      const session = await mongoose.startSession();
+      session.startTransaction();
 
-        const { title, description, date, type, maxseats, location } = req.body;
+      try {
+        if (!id) return res.status(400).json({ error: 'Event ID is required' });
+
+        const {
+          title,
+          description,
+          date,
+          type,
+          maxseats,
+          location,
+          startTime,
+          endTime,
+          price,
+        } = req.body;
 
         if (
           !title &&
@@ -200,34 +212,57 @@ class EventController {
           !date &&
           !type &&
           !maxseats &&
-          !location
-        ) {
+          !location &&
+          !startTime &&
+          !endTime &&
+          !price
+        )
           return res
             .status(400)
             .json({ error: 'At least one field must be provided for update' });
-        }
 
-        const event = await findEventById(id);
+        const event = await Event.findById(id);
 
-        if (!event) {
-          return res.status(404).json({ error: 'Event not found' });
-        }
+        if (!event) return res.status(404).json({ error: 'Event not found' });
 
         if (title) event.title = title;
         if (description) event.description = description;
+        if (location) event.location = location;
+
+        if (price) {
+          if (!Number(price)) {
+            return res.status(400).json({ error: 'Invalid date format' });
+          }
+          event.price = price;
+        }
+
         if (date) {
           if (isNaN(Date.parse(date))) {
             return res.status(400).json({ error: 'Invalid date format' });
           }
-          event.date = date;
+          event.time.date = date;
         }
+
+        if (startTime) {
+          if (!/(^([0-1][0-9]|2[0-3]):[0-5][0-9]$)/.test(startTime)) {
+            return res.status(400).json({ error: 'StartTime is invalid' });
+          }
+          event.time.startTime = startTime;
+        }
+
+        if (endTime) {
+          if (!/(^([0-1][0-9]|2[0-3]):[0-5][0-9]$)/.test(endTime)) {
+            return res.status(400).json({ error: 'EndTime is invalid' });
+          }
+          event.time.endTime = endTime;
+        }
+
         if (maxseats) {
-          if (isNaN(maxseats) || maxseats <= 0 || !Number.isInteger(maxseats)) {
+          if (isNaN(maxseats) || maxseats <= 0 || !Number(maxseats)) {
             return res.status(400).json({ error: 'Invalid maxseats value' });
           }
           event.maxseats = maxseats;
         }
-        if (location) event.location = location;
 
         if (type) {
           if (type.isArray()) {
@@ -255,8 +290,14 @@ class EventController {
         }
 
         await event.save();
+
+        await session.commitTransaction();
+        session.endSession();
         res.status(200).json(event);
       } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
         console.error('Error editing event:', error);
         res.status(500).json({ error: 'Failed to edit event' });
       }

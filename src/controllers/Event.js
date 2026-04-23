@@ -313,7 +313,7 @@ class EventController {
           return res.status(400).json({ error: 'Event ID is required' });
         }
 
-        const event = await findEventById(id);
+        const event = await Event.findById(id);
 
         if (!event) {
           return res.status(404).json({ error: 'Event not found' });
